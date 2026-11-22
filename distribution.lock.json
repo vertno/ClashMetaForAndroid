@@ -1,0 +1,12 @@
+{
+  "core": {
+    "commit": "c1443469937cc8f3f3377b53f2d5e8da429921b4",
+    "upstream_commit": "0455d0d28c4526937380505153e65a843d8612e8",
+    "version": "v1.19.34-r2"
+  },
+  "revision": 1,
+  "upstream": "MetaCubeX/ClashMetaForAndroid",
+  "upstream_commit": "f454fa8c569ea2a2396f2fe453ac8263832001d8",
+  "upstream_tag": "v2.11.37",
+  "version": "v1.0.2"
+}
