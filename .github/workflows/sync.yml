@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: vertno/mihomo
-          ref: f0e5124e45bc5fcbbca4c1823854f0385d2b76fc # release tools
+          ref: b18ffe9cf171368b09778f55206b2f79aada761c # release tools
           path: tools
           persist-credentials: false
       - name: Verify release dependency and retry rules
@@ -139,7 +139,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: vertno/mihomo
-          ref: f0e5124e45bc5fcbbca4c1823854f0385d2b76fc # release tools
+          ref: b18ffe9cf171368b09778f55206b2f79aada761c # release tools
           path: tools
           persist-credentials: false
       - uses: actions/download-artifact@v4
