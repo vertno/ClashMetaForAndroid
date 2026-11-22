@@ -1,5 +1,7 @@
-# Clash Meta for Android — personal stable builds
+# Clash Meta for Android Stable Builds
 
-Personal distribution based on [MetaCubeX/ClashMetaForAndroid](https://github.com/MetaCubeX/ClashMetaForAndroid). [Download a signed application or a stable core from Releases](https://github.com/vertno/ClashMetaForAndroid/releases). The release tag points at the complete patched source. The `distribution` branch contains the downstream patch and release controls.
+Download the APK for your phone from the [latest Android release](https://github.com/vertno/ClashMetaForAndroid/releases/latest). Most current Android phones use the `arm64-v8a` package. In the app, Help opens this project. Install a newer APK over your existing personal build to keep its settings.
 
-Use the existing Help project link to find the APK for your ABI on Releases. Android updates require the same application ID and signing certificate. The core is built from the exact released [vertno/mihomo](https://github.com/vertno/mihomo/releases) source recorded for this version.
+The personal package uses `com.github.vertno.clash.meta` and its own signing certificate. It can coexist with the official app. Each release pins the source of the custom Mihomo core before building the Android libraries. [Official CMFA](https://github.com/MetaCubeX/ClashMetaForAndroid) · [Personal core releases](https://github.com/vertno/mihomo/releases)
+
+The release tag contains the patched source and its dependency record. The `distribution` branch holds the patch and release workflow.
