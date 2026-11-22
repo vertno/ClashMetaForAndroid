@@ -1,0 +1,71 @@
+name: setup
+description: Steps from the corresponding upstream release
+runs:
+  using: composite
+  steps:
+  - name: Setup Java
+    uses: actions/setup-java@v5
+    with:
+      distribution: temurin
+      java-version: 21
+  - name: Setup Gradle
+    uses: gradle/actions/setup-gradle@v5
+  - name: Setup Go
+    uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+    with:
+      go-download-base-url: https://github.com/MetaCubeX/go/releases/download/build
+      go-version: '1.26'
+  - name: Apply Patches
+    run: 'cd $(go env GOROOT)
+
+      for p in $GITHUB_WORKSPACE/.github/patch/*.patch; do patch --verbose -p 1 < "$p"; done
+
+      '
+    shell: bash
+  - uses: actions/cache@v5
+    with:
+      path: '~/.cache/go-build
+
+        ~/go/pkg/mod
+
+        '
+      key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      restore-keys: '${{ runner.os }}-go-
+
+        '
+  - name: Convert and set version env
+    id: process-version
+    run: 'VERSION_TAG=${{ inputs.release-tag }}
+
+      VERSION_TAG=${VERSION_TAG#v}                              # remove the ''v'' prefix
+
+      IFS=''.'' read -ra VERSION_PARTS <<< "$VERSION_TAG"         # split into array
+
+      VERSION_CODE=$(printf "%1d%02d%03d" "${VERSION_PARTS[0]}" "${VERSION_PARTS[1]}" "${VERSION_PARTS[2]}")
+
+
+      echo "versonName=$VERSION_TAG" >> $GITHUB_OUTPUT          # "1.2.3"
+
+      echo "versonCode=$VERSION_CODE" >> $GITHUB_OUTPUT         # "102003"
+
+      '
+    shell: bash
+  - name: Re-write version
+    uses: Devofure/advance-android-version-actions@v1.5
+    with:
+      gradlePath: build.gradle.kts
+      versionCode: ${{ steps.process-version.outputs.versonCode }}
+      versionName: ${{ steps.process-version.outputs.versonName }}-patched
+  - name: Update CA
+    run: 'sudo apt-get update && sudo apt-get install ca-certificates
+
+      sudo update-ca-certificates
+
+      cp -f /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
+
+      '
+    shell: bash
+inputs:
+  release-tag:
+    description: Official stable tag before the distribution suffix
+    required: true

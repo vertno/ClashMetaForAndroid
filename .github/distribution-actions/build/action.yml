@@ -1,0 +1,9 @@
+name: build
+description: Steps from the corresponding upstream release
+runs:
+  using: composite
+  steps:
+  - name: Release Build
+    if: success()
+    run: ./gradlew --no-daemon app:assembleMetaRelease
+    shell: bash
