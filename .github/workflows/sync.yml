@@ -14,21 +14,20 @@ jobs:
     permissions:
       contents: write
     outputs:
-      tool_go: ${{ steps.select.outputs.tool_go }}
-      tool_java: ${{ steps.select.outputs.tool_java }}
       tag: ${{ steps.select.outputs.tag }}
       source: ${{ steps.select.outputs.source }}
       core: ${{ steps.select.outputs.core }}
+      upstream_tag: ${{ steps.select.outputs.upstream_tag }}
       waiting: ${{ steps.select.outputs.waiting }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: distribution
+          ref: ${{ github.sha }}
           path: control
       - uses: actions/checkout@v6
         with:
           repository: vertno/mihomo
-          ref: e9c67e55d44cae4ce79c76f999641ae454c5c127 # release tools
+          ref: 9b61d9d4087649f505566c7e142177eb61bd742f # release tools
           path: tools
           persist-credentials: false
       - id: select
@@ -42,18 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          path: control
-          ref: distribution
-          persist-credentials: false
-      - uses: actions/checkout@v6
-        with:
-          path: source
           ref: ${{ needs.plan.outputs.source }}
           submodules: recursive
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify the actual core checkout and the source branch used by CMake
-        working-directory: source
+      - uses: actions/checkout@v6
+        with:
+          path: .distribution-control
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Fetch the pinned core branch used by CMake
         run: |
           tag=$(jq -r '.core.version' distribution.lock.json)
           sha=$(jq -r '.core.commit' distribution.lock.json)
@@ -61,45 +58,10 @@ jobs:
           git -C "$sub" fetch --no-tags origin "+refs/heads/builds/$tag:refs/remotes/origin/builds/$tag"
           test "$(git -C "$sub" rev-parse HEAD)" = "$sha"
           test "$(git -C "$sub" rev-parse "origin/builds/$tag")" = "$sha"
-      - uses: actions/setup-java@v5
+      - uses: ./.github/distribution-actions/setup
         with:
-          distribution: temurin
-          java-version: ${{ needs.plan.outputs.tool_java }}
-      - uses: gradle/actions/setup-gradle@v5
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-download-base-url: https://github.com/MetaCubeX/go/releases/download/build
-          go-version: ${{ needs.plan.outputs.tool_go }}
-          cache-dependency-path: source/core/src/main/golang/go.sum
-      - name: Apply upstream Android Go patches
-        run: |
-          cd "$(go env GOROOT)"
-          for p in "$GITHUB_WORKSPACE"/source/.github/patch/*.patch; do patch --batch -p1 <"$p"; done
-      - name: Set release version as in the upstream release workflow
-        id: version
-        env:
-          TAG: ${{ needs.plan.outputs.tag }}
-        run: |
-          name=${TAG#v}
-          IFS=. read -r major minor patch <<<"$name"
-          code=$(printf '%1d%02d%03d' "$major" "$minor" "$patch")
-          echo "name=$name" >>"$GITHUB_OUTPUT"
-          echo "code=$code" >>"$GITHUB_OUTPUT"
-      - name: Use the upstream Gradle versioning action
-        uses: Devofure/advance-android-version-actions@v1.5
-        with:
-          gradlePath: source/build.gradle.kts
-          versionCode: ${{ steps.version.outputs.code }}
-          versionName: ${{ steps.version.outputs.name }}
-      - name: Update CA from the runner as in the official build
-        working-directory: source
-        run: |
-          sudo apt-get update && sudo apt-get install -y ca-certificates
-          sudo update-ca-certificates
-          cp /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
-          sha256sum core/src/foss/golang/clash/component/ca/ca-certificates.crt
-      - name: Compile and sign the Meta release APKs
-        working-directory: source
+          release-tag: ${{ needs.plan.outputs.upstream_tag }}
+      - name: Prepare the distribution package and signing identity
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -109,17 +71,18 @@ jobs:
           test -n "$KEYSTORE" && test -n "$KEY_PASSWORD"
           printf '%s' "$KEYSTORE" | base64 -d >release.keystore
           printf 'keystore.password=%s\nkey.alias=release\nkey.password=%s\n' "$KEY_PASSWORD" "$KEY_PASSWORD" >signing.properties
-          printf '\ncustom.application.id=com.github.vertno.clash\n' >>local.properties
-          ./gradlew --no-daemon app:assembleMetaRelease
+          printf '\ncustom.application.id=com.github.vertno.clash.meta\nremove.suffix=true\n' >>local.properties
+      - uses: ./.github/distribution-actions/build
       - name: Verify the personal Android package and signing identity
-        run: python3 control/release/verify_apks.py
+        run: python3 .distribution-control/release/verify_apks.py
       - uses: actions/upload-artifact@v4
         with:
           name: android
           path: |
-            source/app/build/outputs/apk/meta/release/*.apk
-            source/app/build/outputs/apk/meta/release/output-metadata.json
+            app/build/outputs/apk/meta/release/*.apk
+            app/build/outputs/apk/meta/release/output-metadata.json
           if-no-files-found: error
+
   publish:
     needs: [plan, build]
     if: needs.plan.outputs.tag != ''
@@ -129,12 +92,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: distribution
+          ref: ${{ github.sha }}
           path: control
       - uses: actions/checkout@v6
         with:
           repository: vertno/mihomo
-          ref: e9c67e55d44cae4ce79c76f999641ae454c5c127 # release tools
+          ref: 9b61d9d4087649f505566c7e142177eb61bd742f # release tools
           path: tools
           persist-credentials: false
       - uses: actions/download-artifact@v4

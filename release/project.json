@@ -2,6 +2,5 @@
   "project": "cmfa",
   "repository": "vertno/ClashMetaForAndroid",
   "upstream": "MetaCubeX/ClashMetaForAndroid",
-  "first_tag": "v2.11.37",
-  "revision": 1
+  "first_tag": "v2.11.37"
 }

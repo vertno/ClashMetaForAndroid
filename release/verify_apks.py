@@ -20,12 +20,12 @@ def signer_fingerprints(build_tools, apk):
 
 
 def verify():
-    output = Path("source/app/build/outputs/apk/meta/release")
+    output = Path("app/build/outputs/apk/meta/release")
     metadata = json.loads((output / "output-metadata.json").read_text())
     app = "com.github.vertno.clash.meta"
     if metadata["applicationId"] != app:
         raise ValueError("Unexpected application ID")
-    expected_signer = Path("control/release/certificate.sha256").read_text().strip().lower()
+    expected_signer = Path(__file__).with_name("certificate.sha256").read_text().strip().lower()
     versions = (Path(os.environ["ANDROID_HOME"]) / "build-tools").iterdir()
     tools = max((p for p in versions if re.fullmatch(r"\d+\.\d+\.\d+", p.name)),
                 key=lambda p: tuple(map(int, p.name.split("."))))
