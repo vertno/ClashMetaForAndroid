@@ -1,0 +1,180 @@
+name: Stable release
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '43 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.select.outputs.tag }}
+      source: ${{ steps.select.outputs.source }}
+      core: ${{ steps.select.outputs.core }}
+      waiting: ${{ steps.select.outputs.waiting }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: distribution
+          path: control
+      - uses: actions/checkout@v6
+        with:
+          repository: vertno/mihomo
+          ref: bed05b83259fa4e683cbf16ff62ff02248f5319e # release tools
+          path: tools
+          persist-credentials: false
+      - name: Verify release dependency and retry rules
+        run: python3 -B -m unittest discover -s tools/release -p test_release.py
+      - id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/release/sync.py
+  build:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: control
+          ref: distribution
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          path: source
+          ref: ${{ needs.plan.outputs.source }}
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the actual core checkout and the source branch used by CMake
+        working-directory: source
+        run: |
+          tag=$(jq -r '.core.version' distribution.lock.json)
+          sha=$(jq -r '.core.commit' distribution.lock.json)
+          sub=core/src/foss/golang/clash
+          git -C "$sub" fetch --no-tags origin "+refs/heads/builds/$tag:refs/remotes/origin/builds/$tag"
+          test "$(git -C "$sub" rev-parse HEAD)" = "$sha"
+          test "$(git -C "$sub" rev-parse "origin/builds/$tag")" = "$sha"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-download-base-url: https://github.com/MetaCubeX/go/releases/download/build
+          go-version: '1.26'
+          cache-dependency-path: source/core/src/main/golang/go.sum
+      - name: Apply upstream Android Go patches
+        run: |
+          cd "$(go env GOROOT)"
+          for p in "$GITHUB_WORKSPACE"/source/.github/patch/*.patch; do patch --batch -p1 <"$p"; done
+      - name: Set release version as in the upstream release workflow
+        id: version
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          name=${TAG#v}
+          IFS=. read -r major minor patch <<<"$name"
+          code=$(printf '%1d%02d%03d' "$major" "$minor" "$patch")
+          echo "name=$name" >>"$GITHUB_OUTPUT"
+          echo "code=$code" >>"$GITHUB_OUTPUT"
+      - name: Use the upstream Gradle versioning action
+        uses: Devofure/advance-android-version-actions@v1.5
+        with:
+          gradlePath: source/build.gradle.kts
+          versionCode: ${{ steps.version.outputs.code }}
+          versionName: ${{ steps.version.outputs.name }}
+      - name: Update CA from the runner as in the official build
+        working-directory: source
+        run: |
+          sudo apt-get update && sudo apt-get install -y ca-certificates
+          sudo update-ca-certificates
+          cp /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
+          sha256sum core/src/foss/golang/clash/component/ca/ca-certificates.crt
+      - name: Compile and sign the Meta release APKs
+        working-directory: source
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          test -n "$KEYSTORE" && test -n "$KEY_PASSWORD"
+          printf '%s' "$KEYSTORE" | base64 -d >release.keystore
+          printf 'keystore.password=%s\nkey.alias=release\nkey.password=%s\n' "$KEY_PASSWORD" "$KEY_PASSWORD" >signing.properties
+          printf '\ncustom.application.id=com.github.vertno.clash\n' >>local.properties
+          ./gradlew --no-daemon app:assembleMetaRelease
+      - name: Verify APKS, application ID, external actions, version and signing certificate
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: python3 control/release/verify_apks.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            source/app/build/outputs/apk/meta/release/*.apk
+            source/app/build/outputs/apk/meta/release/output-metadata.json
+          if-no-files-found: error
+  publish:
+    needs: [plan, build]
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: distribution
+          path: control
+      - uses: actions/checkout@v6
+        with:
+          repository: vertno/mihomo
+          ref: bed05b83259fa4e683cbf16ff62ff02248f5319e # release tools
+          path: tools
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Verify and publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source }}
+        run: |
+          python3 tools/release/publish.py
+  wake:
+    needs: [plan, publish]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.waiting == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report pending app installation
+        if: vars.WAKE_APP_CLIENT_ID == ''
+        run: echo '::warning::Cross-repository wake requires the release app. Scheduled reconciliation remains enabled.'
+      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
+        id: app
+        if: vars.WAKE_APP_CLIENT_ID != ''
+        with:
+          client-id: ${{ vars.WAKE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WAKE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: mihomo
+          permission-actions: write
+      - name: Wake dependent release checks
+        if: steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          status=0
+          for repo in mihomo; do
+            gh workflow run sync.yml -R "vertno/$repo" --ref distribution || status=1
+          done
+          exit "$status"
